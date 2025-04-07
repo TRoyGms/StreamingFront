@@ -6,27 +6,54 @@ export default function VideoThumbnail({ videoUrl }) {
   const [thumbnail, setThumbnail] = useState(null);
 
   useEffect(() => {
-    const captureThumbnail = () => {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const image = canvas.toDataURL("image/jpeg");
-      setThumbnail(image);
-    };
+    const stored = localStorage.getItem(`thumb-${videoUrl}`);
+    if (stored) {
+      setThumbnail(stored);
+      return;
+    }
 
     const video = videoRef.current;
+    const canvas = canvasRef.current;
+    let timeoutId;
 
-    // Escoge un segundo aleatorio entre 1 y 5
-    const randomTime = Math.floor(Math.random() * 5) + 1;
-    video.currentTime = randomTime;
+    const handleCapture = () => {
+      try {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const image = canvas.toDataURL("image/jpeg");
+        setThumbnail(image);
+        localStorage.setItem(`thumb-${videoUrl}`, image);
+      } catch (err) {
+        console.error("❌ Error al capturar miniatura:", err);
+      }
+    };
 
-    video.addEventListener("seeked", captureThumbnail);
-    return () => video.removeEventListener("seeked", captureThumbnail);
+    const handleLoadedData = () => {
+      video.currentTime = 1;
+    };
+
+    const handleSeeked = () => {
+      handleCapture();
+      clearTimeout(timeoutId);
+    };
+
+    const handleTimeout = () => {
+      console.warn("⚠️ Miniatura cancelada por timeout para:", videoUrl);
+      video.src = "";
+    };
+
+    video.addEventListener("loadeddata", handleLoadedData);
+    video.addEventListener("seeked", handleSeeked);
+
+    timeoutId = setTimeout(handleTimeout, 5000); // 5 segundos máx
+
+    return () => {
+      video.removeEventListener("loadeddata", handleLoadedData);
+      video.removeEventListener("seeked", handleSeeked);
+      clearTimeout(timeoutId);
+    };
   }, [videoUrl]);
 
   return (

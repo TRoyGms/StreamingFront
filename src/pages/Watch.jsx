@@ -1,5 +1,6 @@
-import { useEffect, useState, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+// ...importaciones
+import { useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Play,
   Pause,
@@ -10,29 +11,34 @@ import {
   ChevronLeft,
   FastForward,
   Rewind,
+  RotateCcw,
 } from "lucide-react";
 
 export default function Watch() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [video, setVideo] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [isBuffering, setIsBuffering] = useState(true);
-  const [bufferedEnd, setBufferedEnd] = useState(0);
-  const videoRef = useRef();
-  const controlsRef = useRef();
   const [paused, setPaused] = useState(false);
   const [volume, setVolume] = useState(1);
   const [showControls, setShowControls] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [showReturn, setShowReturn] = useState(false);
+  const [bufferedEnd, setBufferedEnd] = useState(0);
+  const [isBuffering, setIsBuffering] = useState(true);
   const [volumeDisplay, setVolumeDisplay] = useState(null);
+  const [showReturn, setShowReturn] = useState(false);
+  const [videoEnded, setVideoEnded] = useState(false);
+  const [videoAspect, setVideoAspect] = useState("landscape");
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const videoRef = useRef();
+
+  const videoUrl = `http://3.219.191.147:8080/api/videos/${id}`;
 
   const togglePlay = () => {
     if (videoRef.current.paused) {
-      videoRef.current.play();
+      videoRef.current.play().catch(() => {}); // Evita AbortError
       setPaused(false);
+      setVideoEnded(false);
     } else {
       videoRef.current.pause();
       setPaused(true);
@@ -59,7 +65,6 @@ export default function Watch() {
   const handleKeyboard = (e) => {
     const vid = videoRef.current;
     if (!vid) return;
-
     switch (e.key.toLowerCase()) {
       case " ":
         e.preventDefault();
@@ -91,7 +96,7 @@ export default function Watch() {
         toggleFullscreen();
         break;
       case "escape":
-        navigate("/home");
+        navigate("/novedades");
         break;
       default:
         break;
@@ -104,24 +109,7 @@ export default function Watch() {
     window._controlsTimeout = setTimeout(() => {
       setShowControls(false);
     }, 3000);
-
-    if (e.clientY < 100 && e.clientX < 200) {
-      setShowReturn(true);
-    } else {
-      setShowReturn(false);
-    }
-  };
-
-  const handleTimeUpdate = () => {
-    const vid = videoRef.current;
-    const percent = (vid.currentTime / vid.duration) * 100;
-    setProgress(percent || 0);
-
-    const buffered = vid.buffered;
-    if (buffered.length) {
-      const end = buffered.end(buffered.length - 1);
-      setBufferedEnd((end / vid.duration) * 100);
-    }
+    setShowReturn(e.clientY < 100 && e.clientX < 200);
   };
 
   const handleSeek = (e) => {
@@ -131,10 +119,10 @@ export default function Watch() {
     videoRef.current.currentTime = videoRef.current.duration * percent;
   };
 
-  const handleVideoError = () => {
-    videoRef.current.src = "";
-    videoRef.current.load();
-    videoRef.current.play();
+  const formatTime = (time) => {
+    const minutes = Math.floor(time / 60).toString().padStart(2, "0");
+    const seconds = Math.floor(time % 60).toString().padStart(2, "0");
+    return `${minutes}:${seconds}`;
   };
 
   const showVolumeDisplay = (value) => {
@@ -146,95 +134,135 @@ export default function Watch() {
     }, 1000);
   };
 
-  useEffect(() => {
-    fetch(`http://3.219.191.147:8080/api/videos/${id}`)
-      .then((res) => res.json())
-      .then((data) => {
-        setVideo(data);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [id]);
+  const handleLoadedMetadata = () => {
+    const vid = videoRef.current;
+    setVideoAspect(vid.videoHeight > vid.videoWidth ? "portrait" : "landscape");
+    setDuration(vid.duration);
+  };
 
   useEffect(() => {
     document.addEventListener("keydown", handleKeyboard);
     return () => document.removeEventListener("keydown", handleKeyboard);
   }, []);
 
-  if (loading || !video) {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center">
-        <p>{loading ? "Cargando video..." : "No se pudo cargar el video."}</p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const video = videoRef.current;
+    const updateBuffered = () => {
+      if (!video || !video.duration) return;
 
-  const videoUrl = `http://3.219.191.147:8080/${video.FilePath}?t=${Date.now()}`;
+      const buffered = video.buffered;
+      if (buffered.length) {
+        const end = buffered.end(buffered.length - 1);
+        const bufferWithOffset = Math.min(end + 10, video.duration); // +10 segundos
+        setBufferedEnd((bufferWithOffset / video.duration) * 100);
+        setCurrentTime(video.currentTime);
+        setProgress((video.currentTime / video.duration) * 100);
+      }
+    };
+
+    video.addEventListener("progress", updateBuffered);
+    video.addEventListener("timeupdate", updateBuffered);
+    return () => {
+      video.removeEventListener("progress", updateBuffered);
+      video.removeEventListener("timeupdate", updateBuffered);
+    };
+  }, []);
 
   return (
     <div
       className="bg-black text-white w-screen h-screen relative overflow-hidden"
       onMouseMove={handleMouseMove}
     >
+      {videoAspect === "portrait" && (
+        <div
+          className="absolute w-full h-full object-cover blur-2xl scale-110 brightness-50"
+          style={{
+            backgroundImage: `url(${videoUrl})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            zIndex: 0,
+          }}
+        />
+      )}
+
       <video
-        autoPlay
         ref={videoRef}
         src={videoUrl}
-        className="w-full h-full object-cover"
+        preload="metadata"
+        autoPlay
+        controls={false}
+        className={`absolute top-1/2 left-1/2 z-10 transform -translate-x-1/2 -translate-y-1/2 ${
+          videoAspect === "portrait" ? "h-full w-auto" : "w-full h-full"
+        }`}
         onClick={togglePlay}
-        onTimeUpdate={handleTimeUpdate}
-        onError={handleVideoError}
-        onWaiting={() => setIsBuffering(true)}
         onCanPlay={() => {
-            setIsBuffering(false);
-            if (videoRef.current && videoRef.current.paused) {
-              videoRef.current.play().catch(() => {
-                // Algunos navegadores requieren interacción del usuario
-              });
-            }
-          }}          
+          videoRef.current.play().catch(() => {});
+          setIsBuffering(false);
+        }}
+        onWaiting={() => setIsBuffering(true)}
+        onPlaying={() => {
+          setIsBuffering(false);
+          setVideoEnded(false);
+        }}
+        onEnded={() => setVideoEnded(true)}
+        onLoadedMetadata={handleLoadedMetadata}
+        onError={() => console.error("Error al reproducir el video.")}
       />
 
-        {isBuffering && (
+      {/* Spinner de carga */}
+      {isBuffering && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-30">
-            <div className="w-24 h-24 border-6 border-[#9146FF] border-t-transparent rounded-full animate-spin" />
+          <div className="w-24 h-24 border-6 border-[#9146FF] border-t-transparent rounded-full animate-spin" />
         </div>
-        )}
+      )}
 
+      {/* Botón de repetir */}
+      {videoEnded && (
+        <div className="absolute inset-0 flex items-center justify-center z-40">
+          <button
+            onClick={() => {
+              videoRef.current.currentTime = 0;
+              videoRef.current.play().catch(() => {});
+              setVideoEnded(false);
+            }}
+            className="bg-[#9146FF] hover:bg-[#6e34c9] text-white px-8 py-4 rounded-full text-lg font-bold shadow-lg transition-all animate-fade-in"
+          >
+            <RotateCcw className="inline-block mr-2" /> Repetir video
+          </button>
+        </div>
+      )}
+
+      {/* Toast volumen */}
       {volumeDisplay && (
         <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-black/70 px-6 py-2 rounded text-lg text-white z-30">
           {volumeDisplay}
         </div>
       )}
 
+      {/* Botón regresar */}
       <div
-        onClick={() => navigate("/home")}
-        className={`absolute top-5 left-5 px-5 py-3 text-xl text-white rounded cursor-pointer z-20 flex items-center gap-2
+        onClick={() => navigate("/novedades")}
+        className={`absolute top-5 left-5 px-5 py-3 text-xl text-white rounded cursor-pointer z-40 flex items-center gap-2
         bg-black/20 hover:text-[#9146FF] transition-all duration-300 ease-in-out
         ${showReturn ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-5 pointer-events-none"}`}
       >
         <ChevronLeft size={20} /> Regresar al Inicio
       </div>
 
+      {/* 🎯 Controles personalizados */}
       <div
-        ref={controlsRef}
         className={`absolute bottom-0 left-0 right-0 px-12 py-8 
         bg-gradient-to-t from-[#212121] to-transparent text-white 
         transition-all duration-500 ease-in-out z-10 
         ${showControls ? "opacity-80 translate-y-0" : "opacity-0 translate-y-8 pointer-events-none"}`}
       >
-        <div
-          className="w-full h-4 bg-zinc-700 rounded mb-6 cursor-pointer relative"
-          onClick={handleSeek}
-        >
-          <div
-            className="absolute h-full bg-blue-600/50 rounded left-0 top-0"
-            style={{ width: `${bufferedEnd}%` }}
-          />
-          <div
-            className="absolute h-full bg-[#a14fff] rounded left-0 top-0"
-            style={{ width: `${progress}%` }}
-          />
+        <div className="w-full h-4 relative rounded mb-2 cursor-pointer" onClick={handleSeek}>
+          <div className="absolute h-full bg-zinc-700 rounded left-0 top-0 w-full z-0" />
+          <div className="absolute h-full bg-blue-600/50 rounded left-0 top-0 z-10" style={{ width: `${bufferedEnd}%` }} />
+          <div className="absolute h-full bg-[#a14fff] rounded left-0 top-0 z-20" style={{ width: `${progress}%` }} />
+          <div className="absolute bottom-full left-0 mb-2 text-2xl text-zinc-300 z-30">
+            {formatTime(currentTime)} / {formatTime(duration)}
+          </div>
         </div>
 
         <div className="flex flex-col items-center justify-center gap-3 text-lg mb-4">

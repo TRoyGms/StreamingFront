@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Header from "../dependencies/Header";
-import VideoThumbnail from "../dependencies/VideoThumbnail"; // Ajusta la ruta si está en otra carpeta
+import VideoThumbnail from "../dependencies/VideoThumbnail";
 
 export default function Novedades() {
   const [videos, setVideos] = useState([]);
   const [filtered, setFiltered] = useState([]);
+  const [availableTypes, setAvailableTypes] = useState([]);
   const [durationFilter, setDurationFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
 
@@ -15,6 +16,18 @@ export default function Novedades() {
       .then((data) => {
         setVideos(data);
         setFiltered(data);
+
+        // Sacamos los tipos únicos normalizados (sin tildes ni mayúsculas)
+        const types = Array.from(
+          new Set(
+            data
+              .map((v) =>
+                v.ContentType?.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+              )
+              .filter(Boolean)
+          )
+        );
+        setAvailableTypes(types);
       });
   }, []);
 
@@ -24,15 +37,18 @@ export default function Novedades() {
     if (durationFilter !== "all") {
       temp = temp.filter((v) => {
         const dur = v.Duration || 0;
-        if (durationFilter === "less2") return dur < 120;
-        if (durationFilter === "between2and5") return dur >= 120 && dur <= 300;
-        if (durationFilter === "more5") return dur > 300;
+        if (durationFilter === "less2") return dur < 2;
+        if (durationFilter === "between2and5") return dur >= 2 && dur <= 5;
+        if (durationFilter === "more5") return dur > 5;
         return true;
       });
     }
 
     if (typeFilter !== "all") {
-      temp = temp.filter((v) => v.Type?.toLowerCase() === typeFilter);
+      temp = temp.filter((v) => {
+        const normalized = v.ContentType?.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        return normalized === typeFilter;
+      });
     }
 
     setFiltered(temp);
@@ -45,7 +61,6 @@ export default function Novedades() {
       <div className="max-w-6xl mx-auto px-4 pt-36 pb-12">
         <h1 className="text-4xl font-bold text-[#9146FF] mb-6 text-center">📺 Novedades</h1>
 
-        {/* Filtros */}
         <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-10">
           <div className="flex flex-wrap items-center gap-4">
             <label className="text-sm text-zinc-300">Duración:</label>
@@ -69,14 +84,18 @@ export default function Novedades() {
               className="bg-zinc-800 text-white px-4 py-2 rounded focus:outline-none"
             >
               <option value="all">Todos</option>
-              <option value="meme">🎭 Meme</option>
-              <option value="musical">🎵 Musical</option>
-              <option value="tkt">📘 Informativo / TKT</option>
+              {availableTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type === "meme" ? "🎭 Meme" :
+                   type === "musica" ? "🎵 Musical" :
+                   type === "informativo" ? "📘 Informativo / TKT" :
+                   type.charAt(0).toUpperCase() + type.slice(1)}
+                </option>
+              ))}
             </select>
           </div>
         </div>
 
-        {/* Lista de videos */}
         {filtered.length === 0 ? (
           <p className="text-zinc-400 text-center">No hay videos que coincidan con los filtros.</p>
         ) : (
